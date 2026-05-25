@@ -140,13 +140,8 @@ app.get("/api/debug-ap", async (req, res) => {
     const url = `https://${HOST}/flights/auto-complete?query=${encodeURIComponent(q||"Fortaleza")}&locale=pt-BR`;
     const r = await fetch(url, { headers: hdr() });
     const data = await r.json();
-    const items = (data.data||[]).slice(0,5).map(a=>({
-      skyId: a.skyId, 
-      entityId: a.entityId,
-      id: a.id,
-      name: a.presentation?.title || a.name || a.iata
-    }));
-    res.json({ status: r.status, items });
+    // Retorna os primeiros 3 itens COMPLETOS para ver a estrutura real
+    res.json({ status: r.status, raw_first_3: (data.data||data||[]).slice(0,3) });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
