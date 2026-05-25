@@ -176,22 +176,5 @@ app.get("/api/debug-flight", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-  const { origin, dest } = req.query;
-  if (!origin || !dest) return res.status(400).json({ error: "origin e dest são obrigatórios" });
-  try {
-    const [oAp, dAp] = await Promise.all([
-      getAirportId(origin.toUpperCase()),
-      getAirportId(dest.toUpperCase()),
-    ]);
-    const url = `https://${HOST}/flights/price-calendar` +
-      `?fromEntityId=${oAp.entityId}&toEntityId=${dAp.entityId}&currency=BRL`;
-    const r = await fetch(url, { headers: hdr() });
-    if (!r.ok) throw new Error(`Calendar API ${r.status}`);
-    const data = await r.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.listen(PORT, () => console.log(`✈ VooScanner na porta ${PORT} — ${HOST}`));
