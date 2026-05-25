@@ -1,5 +1,6 @@
 const express = require("express");
 const cors    = require("cors");
+const path    = require("path");
 const fetch   = (...args) => import("node-fetch").then(({default: f}) => f(...args));
 
 const app  = express();
@@ -9,6 +10,8 @@ const HOST = "flights-sky.p.rapidapi.com";
 
 app.use(cors());
 app.use(express.json());
+// Serve o frontend estático da pasta public/
+app.use(express.static(path.join(__dirname, "public")));
 
 const hdr = () => ({
   "x-rapidapi-host": HOST,
