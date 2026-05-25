@@ -149,8 +149,33 @@ app.get("/api/flights", async (req, res) => {
   }
 });
 
-// Calendário de preços — encontra datas mais baratas
-app.get("/api/calendar", async (req, res) => {
+// Debug — descobre o entityId correto de um aeroporto
+app.get("/api/debug-airport", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).json({ error: "code obrigatório" });
+  try {
+    const url = `https://${HOST}/flights/airports?query=${encodeURIComponent(code)}`;
+    const r = await fetch(url, { headers: hdr() });
+    const txt = await r.text();
+    res.json({ status: r.status, raw: JSON.parse(txt) });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Debug — testa a busca de voos com entityIds específicos
+app.get("/api/debug-flight", async (req, res) => {
+  const { fromId, toId, date } = req.query;
+  try {
+    const url = `https://${HOST}/flights/search-one-way?fromEntityId=${fromId}&toEntityId=${toId}&departDate=${date||"2026-07-10"}&adults=1&currency=BRL`;
+    const r = await fetch(url, { headers: hdr() });
+    const txt = await r.text();
+    const data = JSON.parse(txt);
+    res.json({ status: r.status, itineraries: data?.data?.itineraries?.length||0, raw_sample: data?.data?.itineraries?.[0] || data });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
   const { origin, dest } = req.query;
   if (!origin || !dest) return res.status(400).json({ error: "origin e dest são obrigatórios" });
   try {
