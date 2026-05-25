@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>VooScanner Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700;900&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07101D;color:#fff;font-family:'DM Sans','Segoe UI',sans-serif;min-height:100vh}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0C1422}::-webkit-scrollbar-thumb{background:rgba(0,229,255,.2);border-radius:2px}
+input,select,button{font-family:inherit}
+a{text-decoration:none;color:inherit}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
+@keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// Usa URL relativa — funciona porque HTML e API estão no mesmo servidor
+const API = "";
+
+const AVG = {
+  "FOR-GRU":820,"FOR-GIG":890,"FOR-BSB":710,"FOR-LIS":3100,"FOR-MIA":4200,
+  "FOR-JFK":4500,"FOR-MCO":4100,"REC-GRU":790,"REC-LIS":2900,"REC-MIA":4000,
+  "SSA-GRU":730,"SSA-GIG":690,"GRU-MIA":3800,"GRU-JFK":4100,"GRU-LIS":3400,
+  "GRU-MAD":3600,"GRU-CDG":3800,"GRU-LHR":4000,"GRU-FRA":3900,
+  "GIG-MIA":3600,"GIG-JFK":4200,"GIG-LIS":3300,
+  "POA-GRU":640,"CWB-GRU":570,"BSB-GRU":600,"MAO-GRU":1100,
+};
+const AIRPORTS = [
+  {c:"GRU",n:"São Paulo",s:"Guarulhos",f:"🇧🇷"},
+  {c:"CGH",n:"São Paulo",s:"Congonhas",f:"🇧🇷"},
+  {c:"GIG",n:"Rio de Janeiro",s:"Galeão",f:"🇧🇷"},
+  {c:"BSB",n:"Brasília",s:"Pres. JK",f:"🇧🇷"},
+  {c:"FOR",n:"Fortaleza",s:"Pinto Martins",f:"🇧🇷"},
+  {c:"SSA",n:"Salvador",s:"Dep. Luís Eduardo",f:"🇧🇷"},
+  {c:"REC",n:"Recife",s:"Guararapes",f:"🇧🇷"},
+  {c:"MAO",n:"Manaus",s:"Eduardo Gomes",f:"🇧🇷"},
+  {c:"CWB",n:"Curitiba",s:"Afonso Pena",f:"🇧🇷"},
+  {c:"POA",n:"Porto Alegre",s:"Salgado Filho",f:"🇧🇷"},
+  {c:"BEL",n:"Belém",s:"Val de Cans",f:"🇧🇷"},
+  {c:"NAT",n:"Natal",s:"Augusto Severo",f:"🇧🇷"},
+  {c:"FLN",n:"Florianópolis",s:"Hercílio Luz",f:"🇧🇷"},
+  {c:"MIA",n:"Miami",s:"Miami International",f:"🇺🇸"},
+  {c:"JFK",n:"New York",s:"John F. Kennedy",f:"🇺🇸"},
+  {c:"LAX",n:"Los Angeles",s:"Los Angeles Intl.",f:"🇺🇸"},
+  {c:"MCO",n:"Orlando",s:"Orlando International",f:"🇺🇸"},
+  {c:"LIS",n:"Lisboa",s:"Humberto Delgado",f:"🇵🇹"},
+  {c:"MAD",n:"Madrid",s:"Adolfo Suárez",f:"🇪🇸"},
+  {c:"CDG",n:"Paris",s:"Charles de Gaulle",f:"🇫🇷"},
+  {c:"LHR",n:"Londres",s:"Heathrow",f:"🇬🇧"},
+  {c:"FRA",n:"Frankfurt",s:"Frankfurt am Main",f:"🇩🇪"},
+  {c:"AMS",n:"Amsterdam",s:"Schiphol",f:"🇳🇱"},
+  {c:"FCO",n:"Roma",s:"Leonardo da Vinci",f:"🇮🇹"},
+  {c:"BCN",n:"Barcelona",s:"El Prat",f:"🇪🇸"},
+];
+
+function avgFor(o,d){return AVG[o+"-"+d]||AVG[d+"-"+o]||900;}
+function pctOff(p,a){return a>0?Math.round(((a-p)/a)*100):0;}
+function ap(c){return AIRPORTS.find(a=>a.c===c)||{c,n:c,f:"✈",s:""};}
+function fmtDate(s){if(!s)return"";var p=s.split("-");return p[2]+"/"+["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][+p[1]-1];}
+function fmtFull(s){if(!s)return"";var p=s.split("-"),dw=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"],d=new Date(+p[0],+p[1]-1,+p[2]);return dw[d.getDay()]+", "+p[2]+" "+["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][+p[1]-1];}
+function defDate(){var d=new Date();d.setDate(d.getDate()+14);return d.toISOString().split("T")[0];}
+
+var state={
+  tab:"buscar",origin:"FOR",dest:"GRU",
+  date:defDate(),pax:1,
+  flights:null,loading:false,error:"",
+  monitors:JSON.parse(localStorage.getItem("monitors")||"[]"),
+  mO:"",mD:"",mTarget:"",mDate:"",mLoading:false,checkingId:null,
+};
+
+function setState(u){Object.assign(state,typeof u==="function"?u(state):u);render();}
+
+async function searchFlights(origin,dest,date,pax){
+  var res=await fetch(API+"/api/flights?origin="+origin+"&dest="+dest+"&date="+date+"&pax="+pax);
+  if(!res.ok){var e=await res.json().catch(()=>({}));throw new Error(e.error||"Erro "+res.status);}
+  var data=await res.json();
+  return data.flights||[];
+}
+
+function render(){
+  document.getElementById("app").innerHTML=renderMain();
+}
+
+function renderMain(){
+  var avg=avgFor(state.origin,state.dest);
+  var oAp=ap(state.origin),dAp=ap(state.dest);
+  return`
+  <div style="min-height:100vh">
+    <div style="background:#040C16;border-bottom:1px solid rgba(255,255,255,0.06);padding:13px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="background:linear-gradient(135deg,#00E5FF,#0059FF);border-radius:11px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 0 18px rgba(0,229,255,.3)">✈</div>
+        <div>
+          <div style="font-size:18px;font-weight:900">VooScanner <span style="font-size:10px;font-weight:400;opacity:.3">Pro</span></div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="width:5px;height:5px;border-radius:50%;background:#2DBE74;animation:blink 2s infinite"></div>
+            <span style="font-size:9px;color:#2DBE74;font-weight:700">PREÇOS REAIS · SKYSCANNER · AO VIVO</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="background:#040C16;border-bottom:1px solid rgba(255,255,255,0.06);padding:0 24px;display:flex">
+      <button onclick="setState({tab:'buscar'})" style="background:transparent;border:none;border-bottom:${state.tab==="buscar"?"2px solid #00E5FF":"2px solid transparent"};color:${state.tab==="buscar"?"#00E5FF":"rgba(255,255,255,0.38)"};padding:13px 20px;font-size:12px;font-weight:700;cursor:pointer">✈ Buscar Passagens</button>
+      <button onclick="setState({tab:'monitorar'})" style="background:transparent;border:none;border-bottom:${state.tab==="monitorar"?"2px solid #00E5FF":"2px solid transparent"};color:${state.tab==="monitorar"?"#00E5FF":"rgba(255,255,255,0.38)"};padding:13px 20px;font-size:12px;font-weight:700;cursor:pointer">📡 Monitorar${state.monitors.length?" ("+state.monitors.length+")":""}</button>
+    </div>
+    <div style="padding:22px 24px 60px;max-width:920px;margin:0 auto">
+      ${state.tab==="buscar"?renderBuscar(avg,oAp,dAp):renderMonitorar()}
+    </div>
+  </div>`;
+}
+
+function renderBuscar(avg,oAp,dAp){
+  return`
+  <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:18px;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:1fr 36px 1fr 1fr 1fr auto;gap:10px;align-items:end">
+      ${renderSel("origin",state.origin,state.dest)}
+      <button onclick="setState({origin:state.dest,dest:state.origin,flights:null})"
+        style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:9px;width:36px;height:44px;cursor:pointer;color:#fff;font-size:15px">⇄</button>
+      ${renderSel("dest",state.dest,state.origin)}
+      <div>
+        <div style="font-size:9px;opacity:.28;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase">Data ida</div>
+        <input type="date" value="${state.date}" min="${new Date().toISOString().split("T")[0]}" onchange="setState({date:this.value,flights:null})"
+          style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px 11px;color:#fff;font-size:12px;outline:none;cursor:pointer"/>
+      </div>
+      <div>
+        <div style="font-size:9px;opacity:.28;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase">Passageiros</div>
+        <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:10px;height:44px">
+          <button onclick="setState({pax:Math.max(1,state.pax-1)})" style="background:rgba(255,255,255,0.07);border:none;color:#fff;width:24px;height:24px;border-radius:5px;cursor:pointer;font-size:14px">−</button>
+          <span style="font-weight:700;font-size:14px;min-width:12px;text-align:center">${state.pax}</span>
+          <button onclick="setState({pax:Math.min(9,state.pax+1)})" style="background:rgba(0,229,255,0.13);border:none;color:#00E5FF;width:24px;height:24px;border-radius:5px;cursor:pointer;font-size:14px">+</button>
+        </div>
+      </div>
+      <button onclick="doBuscar()"
+        style="background:${state.loading?"rgba(255,255,255,0.05)":"linear-gradient(135deg,#00B4E6,#0059FF)"};border:none;color:#fff;padding:0 18px;border-radius:10px;font-size:12px;font-weight:800;cursor:pointer;height:44px;white-space:nowrap;box-shadow:0 0 20px rgba(0,180,230,0.3)">
+        ${state.loading?"⟳ Buscando...":"Buscar"}
+      </button>
+    </div>
+  </div>
+  ${state.loading?`<div style="text-align:center;padding:44px 0"><div style="font-size:36px;animation:float 1.3s ease-in-out infinite;margin-bottom:14px">✈</div><div style="font-size:13px;opacity:.55">Consultando Skyscanner...</div><div style="font-size:10px;opacity:.3;margin-top:4px">Verificando disponibilidade real e preços ao vivo</div></div>`:""}
+  ${state.error&&!state.loading?`<div style="background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.28);border-radius:11px;padding:14px 18px;font-size:12px;color:#FF8888;margin-bottom:16px">⚠️ ${state.error}</div>`:""}
+  ${state.flights&&!state.loading?renderFlights(avg,oAp,dAp):""}
+  ${!state.flights&&!state.loading&&!state.error?renderRotas():""}`;
+}
+
+function renderSel(field,val,excl){
+  return`<div>
+    <div style="font-size:9px;opacity:.28;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase">${field==="origin"?"Origem":"Destino"}</div>
+    <select onchange="setState({${field}:this.value,flights:null})"
+      style="width:100%;background:rgba(255,255,255,0.055);border:1px solid rgba(255,255,255,0.11);border-radius:11px;padding:11px 14px;color:#fff;font-size:13px;outline:none;cursor:pointer;height:44px">
+      ${AIRPORTS.filter(a=>a.c!==excl).map(a=>`<option value="${a.c}" ${a.c===val?"selected":""} style="background:#0C1422">${a.f} ${a.c} — ${a.n}</option>`).join("")}
+    </select>
+  </div>`;
+}
+
+function renderFlights(avg,oAp,dAp){
+  return`<div style="animation:fadeIn 0.3s ease">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="display:flex;align-items:center;gap:9px">
+          <div style="font-family:monospace;font-size:20px;font-weight:900;letter-spacing:2px">${state.origin} → ${state.dest}</div>
+          <div style="background:rgba(45,190,116,0.15);border:1px solid rgba(45,190,116,0.35);border-radius:6px;padding:3px 10px;font-size:10px;font-weight:800;color:#2DBE74">✓ ${state.flights.length} voo${state.flights.length>1?"s":""} real${state.flights.length>1?"is":""}</div>
+        </div>
+        <div style="font-size:11px;opacity:.4;margin-top:2px">${oAp.n} → ${dAp.n} · ${fmtFull(state.date)} · média histórica <span style="color:#FFB800;font-weight:700">R$ ${avg.toLocaleString("pt-BR")}</span></div>
+      </div>
+    </div>
+    ${state.flights.map(function(f,i){
+      var pct=pctOff(f.price,avg),isHot=pct>=20,isGood=pct>=8&&pct<20;
+      var col=isHot?"#2DBE74":isGood?"#FFB800":"rgba(255,255,255,0.8)";
+      var bg=isHot?"linear-gradient(135deg,rgba(45,190,116,0.13),rgba(0,120,60,0.05))":isGood?"linear-gradient(135deg,rgba(255,184,0,0.1),rgba(200,140,0,0.03))":"rgba(255,255,255,0.025)";
+      var border=isHot?"1px solid rgba(45,190,116,0.42)":isGood?"1px solid rgba(255,184,0,0.32)":"1px solid rgba(255,255,255,0.07)";
+      var waText=encodeURIComponent("✈️ VOO DISPONÍVEL — PREÇO REAL\n\n"+oAp.f+" "+oAp.n+" → "+dAp.f+" "+dAp.n+"\n📅 "+fmtFull(f.date)+"\n🕐 "+f.dep+" → "+f.arr+(f.durFmt?" ("+f.durFmt+")":"")+"\n✈ "+(f.airlineName||f.airline)+" · "+(f.stops===0?"Direto":"1 parada")+"\n\n💰 "+f.priceFmt+" por pessoa"+(pct>0?"\n📉 −"+pct+"% abaixo da média histórica":"")+"\n\n🔗 Comprar:\n"+f.buyUrl);
+      return`<div style="background:${bg};border:${border};border-radius:14px;overflow:hidden;position:relative;margin-bottom:10px;animation:slideIn 0.28s ease ${i*0.04}s both">
+        <div style="position:absolute;top:0;left:0;display:flex">
+          <div style="background:rgba(45,190,116,0.85);padding:4px 10px;font-size:9px;font-weight:800;color:#fff;border-radius:14px 0 8px 0">✓ REAL · SKYSCANNER</div>
+          ${pct>=8?`<div style="background:${isHot?"#2DBE74":isGood?"#E8A000":"rgba(255,255,255,0.15)"};padding:4px 10px;font-size:9px;font-weight:800;color:${isGood?"#000":"#fff"}">−${pct}% vs média</div>`:""}
+        </div>
+        <div style="padding:14px 16px 12px;margin-top:10px">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="min-width:120px">
+              ${f.airlineLogo?`<img src="${f.airlineLogo}" style="width:24px;height:24px;object-fit:contain;border-radius:4px;vertical-align:middle;margin-right:6px" onerror="this.style.display='none'"/>`:""}
+              <span style="color:#fff;font-weight:700;font-size:12px">${f.airlineName||f.airline}</span>
+              <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-top:2px">${f.stops===0?"✈ Voo direto":f.stops+" parada"}</div>
+            </div>
+            <div style="flex:1;display:flex;align-items:center;gap:10px;min-width:180px">
+              <div style="text-align:center">
+                <div style="font-size:20px;font-weight:900;color:#fff;font-family:monospace;letter-spacing:1px">${f.dep}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.4)">${f.origin}</div>
+              </div>
+              <div style="flex:1;text-align:center">
+                <div style="font-size:9px;color:rgba(255,255,255,0.35)">${f.durFmt||""}</div>
+                <div style="height:1px;background:rgba(255,255,255,0.15);margin:3px 0"></div>
+                <div style="font-size:9px;color:${f.stops===0?"#2DBE74":"#FFB800"}">${f.stops===0?"✓ Direto":f.stops+" parada"}</div>
+              </div>
+              <div style="text-align:center">
+                <div style="font-size:20px;font-weight:900;color:#fff;font-family:monospace;letter-spacing:1px">${f.arr}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.4)">${f.dest}</div>
+              </div>
+            </div>
+            <div style="text-align:right;min-width:130px">
+              <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-bottom:1px">por pessoa · verificado agora</div>
+              <div style="font-size:26px;font-weight:900;color:${col};font-family:monospace;line-height:1">${f.priceFmt}</div>
+              <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:1px">📅 ${fmtDate(f.date)}</div>
+            </div>
+            <a href="${f.buyUrl}" target="_blank"
+              style="display:flex;align-items:center;justify-content:center;gap:6px;background:${isHot?"linear-gradient(135deg,#2DBE74,#1A9E5A)":isGood?"linear-gradient(135deg,#E8A000,#FFB800)":"linear-gradient(135deg,rgba(255,255,255,0.14),rgba(255,255,255,0.06))"};border-radius:10px;padding:12px 18px;color:${isGood?"#000":"#fff"};font-weight:800;font-size:12px;white-space:nowrap;flex-shrink:0">
+              ${isHot?"🔥 Garantir voo ↗":"Comprar ↗"}
+            </a>
+          </div>
+          <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <div style="font-size:10px;color:rgba(255,255,255,0.35)">${fmtFull(f.date)}</div>
+            <a href="https://wa.me/?text=${waText}" target="_blank"
+              style="display:flex;align-items:center;gap:5px;background:rgba(37,211,102,0.12);border:1px solid rgba(37,211,102,0.25);border-radius:7px;padding:5px 11px;font-size:10px;font-weight:700;color:#2DBE74">
+              📲 Compartilhar no WhatsApp
+            </a>
+          </div>
+        </div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderRotas(){
+  var rotas=[["FOR","GRU"],["FOR","LIS"],["FOR","MIA"],["GRU","LIS"],["GRU","MIA"],["GRU","JFK"],["REC","LIS"],["GIG","MIA"],["SSA","GRU"],["GRU","MAD"],["FOR","CDG"],["POA","GRU"]];
+  var intlCodes=["MIA","JFK","LAX","MCO","LIS","MAD","CDG","LHR","FRA","AMS","FCO","BCN"];
+  return`<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:20px">
+    <div style="font-size:10px;opacity:.28;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px">✈ Rotas populares — clique para buscar</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px">
+    ${rotas.map(function(r,i){
+      var o=r[0],d=r[1],av=avgFor(o,d),intl=intlCodes.includes(d),oa=ap(o),da=ap(d);
+      return`<div onclick="setState({origin:'${o}',dest:'${d}',flights:null})"
+        style="background:rgba(${intl?"91,163,255":"255,154,85"},0.05);border:1px solid rgba(${intl?"91,163,255":"255,154,85"},0.17);border-radius:10px;padding:11px 13px;cursor:pointer;transition:all 0.15s"
+        onmouseover="this.style.background='rgba(${intl?"91,163,255":"255,154,85"},0.1)';this.style.transform='translateY(-2px)'"
+        onmouseout="this.style.background='rgba(${intl?"91,163,255":"255,154,85"},0.05)';this.style.transform='translateY(0)'">
+        <div style="font-family:monospace;font-size:14px;font-weight:900;letter-spacing:1.5px;color:#fff;margin-bottom:2px">${o} → ${d}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:5px">${oa.n} → ${da.n}</div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="font-size:8px;opacity:.3">média hist.</span>
+          <span style="font-size:13px;font-weight:800;color:#FFB800;font-family:monospace">R$ ${av.toLocaleString("pt-BR")}</span>
+        </div>
+      </div>`;
+    }).join("")}
+    </div>
+  </div>`;
+}
+
+function renderMonitorar(){
+  return`
+  <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:20px;margin-bottom:24px">
+    <div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:4px">📡 Monitorar rota</div>
+    <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:16px;line-height:1.7">Defina um preço-alvo. Quando encontrar um voo disponível abaixo do limite, exibe o alerta com link direto para compra.</div>
+    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;margin-bottom:12px">
+      ${renderSel("mO",state.mO,state.mD)}
+      <div style="display:flex;align-items:flex-end"><span style="font-size:18px;opacity:.3;padding-bottom:11px">→</span></div>
+      ${renderSel("mD",state.mD,state.mO)}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div>
+        <div style="font-size:9px;opacity:.28;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase">🎯 Me avisar quando ≤ R$</div>
+        <input type="number" id="mTarget" value="${state.mTarget}" placeholder="Ex: 600" oninput="state.mTarget=this.value"
+          style="width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:11px 14px;color:#fff;font-size:16px;font-weight:700;outline:none"/>
+        ${state.mO&&state.mD?`<div style="font-size:9px;color:#FFB800;margin-top:4px">Média histórica: R$ ${avgFor(state.mO,state.mD).toLocaleString("pt-BR")}</div>`:""}
+      </div>
+      <div>
+        <div style="font-size:9px;opacity:.28;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase">📅 Data para monitorar</div>
+        <input type="date" id="mDate" value="${state.mDate}" min="${new Date().toISOString().split("T")[0]}" oninput="state.mDate=this.value"
+          style="width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 12px;color:${state.mDate?"#fff":"rgba(255,255,255,0.3)"};font-size:12px;outline:none;cursor:pointer"/>
+      </div>
+    </div>
+    <button onclick="doAddMonitor()" ${state.mLoading?"disabled":""}
+      style="width:100%;background:${state.mLoading?"rgba(255,255,255,0.05)":"linear-gradient(135deg,#00B4E6,#0059FF)"};border:none;color:#fff;padding:13px;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 0 22px rgba(0,180,230,0.3)">
+      ${state.mLoading?"⟳ Verificando preço real...":"📡 Ativar monitor — verifica imediatamente"}
+    </button>
+  </div>
+  ${state.monitors.length===0?`<div style="text-align:center;padding:36px;opacity:.3;font-size:13px">Nenhum monitor ativo.</div>`:
+    state.monitors.map(function(m,i){return renderMonitorCard(m,i);}).join("")
+  }`;
+}
+
+function renderMonitorCard(m){
+  var avg2=avgFor(m.origin,m.dest),oAp2=ap(m.origin),dAp2=ap(m.dest);
+  var hits=(m.lastResults||[]).filter(function(f){return f.price<=m.target;});
+  var isAlert=hits.length>0;
+  var cheapest=m.lastResults&&m.lastResults.length>0?Math.min.apply(null,m.lastResults.map(function(f){return f.price;})):null;
+  return`<div style="background:${isAlert?"linear-gradient(135deg,rgba(45,190,116,0.12),rgba(0,120,60,0.05))":"rgba(255,255,255,0.025)"};border:${isAlert?"1px solid rgba(45,190,116,0.42)":"1px solid rgba(255,255,255,0.07)"};border-radius:14px;padding:16px 18px;position:relative;margin-bottom:10px">
+    ${isAlert?`<div style="position:absolute;top:0;right:0;background:linear-gradient(135deg,#2DBE74,#1A9E5A);padding:4px 16px 4px 22px;font-size:10px;font-weight:800;color:#fff;clip-path:polygon(12px 0%,100% 0%,100% 100%,0% 100%);border-radius:0 14px 0 0">🔔 ${hits.length} VOO${hits.length>1?"S":""} NO SEU PREÇO!</div>`:""}
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-top:${isAlert?"12px":"0"}">
+      <div style="flex:1">
+        <div style="font-family:monospace;font-size:18px;font-weight:900;color:#fff;letter-spacing:1px;margin-bottom:2px">${m.origin} → ${m.dest}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:10px">${oAp2.n} → ${dAp2.n}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div><div style="font-size:8px;color:rgba(255,255,255,0.28);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px">Meu alerta</div><div style="font-size:16px;font-weight:800;color:#FFB800;font-family:monospace">≤ R$ ${m.target.toLocaleString("pt-BR")}</div></div>
+          <div><div style="font-size:8px;color:rgba(255,255,255,0.28);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px">Média histórica</div><div style="font-size:16px;font-weight:700;color:rgba(255,255,255,0.45);font-family:monospace">R$ ${avg2.toLocaleString("pt-BR")}</div></div>
+          ${cheapest?`<div><div style="font-size:8px;color:rgba(255,255,255,0.28);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px">Menor verificado</div><div style="font-size:16px;font-weight:800;color:${isAlert?"#2DBE74":"rgba(255,255,255,0.5)"};font-family:monospace">R$ ${cheapest.toLocaleString("pt-BR")}</div></div>`:""}
+        </div>
+        ${m.date?`<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px">📅 ${fmtDate(m.date)}</div>`:""}
+        ${m.lastChecked?`<div style="font-size:9px;color:rgba(255,255,255,0.2);margin-top:2px">Verificado: ${new Date(m.lastChecked).toLocaleString("pt-BR")}</div>`:""}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button onclick="doCheckMonitor('${m.id}')" style="background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.25);border-radius:7px;padding:7px 12px;font-size:10px;font-weight:700;color:#00E5FF;cursor:pointer">🔄 Verificar</button>
+        <button onclick="doDeleteMonitor('${m.id}')" style="background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.18);border-radius:7px;padding:7px 12px;font-size:10px;font-weight:700;color:rgba(255,100,100,0.7);cursor:pointer">🗑️ Remover</button>
+      </div>
+    </div>
+    ${isAlert&&hits.length>0?`<div style="margin-top:14px">
+      <div style="font-size:9px;color:rgba(45,190,116,0.7);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:7px">✅ Voos dentro do seu preço</div>
+      ${hits.map(function(f){
+        var waTxt=encodeURIComponent("🔔 ALERTA!\n"+oAp2.n+" → "+dAp2.n+"\n"+fmtFull(f.date)+"\n"+f.priceFmt+" — abaixo de R$ "+m.target.toLocaleString("pt-BR")+"\n"+f.buyUrl);
+        return`<div style="background:rgba(45,190,116,0.08);border:1px solid rgba(45,190,116,0.25);border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+          <div>
+            <div style="font-size:16px;font-weight:900;color:#2DBE74;font-family:monospace;margin-bottom:2px">${f.priceFmt}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.5)">${fmtFull(f.date)} · ${f.dep}→${f.arr} · ${f.airlineName||f.airline} · ${f.stops===0?"Direto":"1 parada"}</div>
+          </div>
+          <div style="display:flex;gap:7px">
+            <a href="${f.buyUrl}" target="_blank" style="background:linear-gradient(135deg,#2DBE74,#1A9E5A);border-radius:8px;padding:8px 14px;font-size:11px;font-weight:800;color:#fff">🎫 Comprar ↗</a>
+            <a href="https://wa.me/?text=${waTxt}" target="_blank" style="background:rgba(37,211,102,0.15);border:1px solid rgba(37,211,102,0.35);border-radius:8px;padding:8px 12px;font-size:14px">📲</a>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`:""}
+  </div>`;
+}
+
+async function doBuscar(){
+  if(!state.origin||!state.dest||!state.date||state.loading)return;
+  setState({loading:true,flights:null,error:""});
+  try{
+    var res=await searchFlights(state.origin,state.dest,state.date,state.pax);
+    if(res.length===0)setState({loading:false,error:"Nenhum voo encontrado. Tente outra data."});
+    else setState({loading:false,flights:res});
+  }catch(e){setState({loading:false,error:"Erro: "+e.message});}
+}
+
+async function doAddMonitor(){
+  var mO=state.mO,mD=state.mD,mTarget=parseFloat(document.getElementById("mTarget").value),mDate=document.getElementById("mDate").value;
+  if(!mO||!mD||!mTarget||!mDate)return;
+  setState({mLoading:true});
+  var m={id:"mon_"+Date.now(),origin:mO,dest:mD,target:mTarget,date:mDate,createdAt:new Date().toISOString(),lastChecked:null,lastResults:null};
+  try{var res=await searchFlights(mO,mD,mDate,1);m.lastResults=res;m.lastChecked=new Date().toISOString();}catch(e){}
+  var nm=[m].concat(state.monitors);
+  localStorage.setItem("monitors",JSON.stringify(nm));
+  setState({mLoading:false,monitors:nm,mO:"",mD:"",mTarget:"",mDate:""});
+}
+
+async function doCheckMonitor(id){
+  var m=state.monitors.find(function(x){return x.id===id;});
+  if(!m||!m.date)return;
+  setState({checkingId:id});
+  try{
+    var res=await searchFlights(m.origin,m.dest,m.date,1);
+    var upd=Object.assign({},m,{lastResults:res,lastChecked:new Date().toISOString()});
+    var nm=state.monitors.map(function(x){return x.id===id?upd:x;});
+    localStorage.setItem("monitors",JSON.stringify(nm));
+    setState({checkingId:null,monitors:nm});
+  }catch(e){setState({checkingId:null});}
+}
+
+function doDeleteMonitor(id){
+  var nm=state.monitors.filter(function(m){return m.id!==id;});
+  localStorage.setItem("monitors",JSON.stringify(nm));
+  setState({monitors:nm});
+}
+
+render();
+</script>
+</body>
+</html>
