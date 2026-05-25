@@ -19,72 +19,37 @@ const hdr = () => ({
   "Content-Type": "application/json",
 });
 
-// IDs de entidade do Skyscanner — pré-carregados, sem usar a API
-// Fonte: Skyscanner entity IDs (sistema interno do Flights Scraper Sky)
-const AIRPORT_MAP = {
-  // Brasil
-  GRU: { skyId:"GRU", entityId:"27539729" },
-  CGH: { skyId:"CGH", entityId:"27539728" },
-  GIG: { skyId:"GIG", entityId:"27536654" },
-  SDU: { skyId:"SDU", entityId:"27536651" },
-  BSB: { skyId:"BSB", entityId:"27540004" },
-  FOR: { skyId:"FOR", entityId:"27540167" },
-  SSA: { skyId:"SSA", entityId:"27540168" },
-  REC: { skyId:"REC", entityId:"27539969" },
-  MAO: { skyId:"MAO", entityId:"27540030" },
-  CWB: { skyId:"CWB", entityId:"27539747" },
-  POA: { skyId:"POA", entityId:"27539958" },
-  BEL: { skyId:"BEL", entityId:"27539762" },
-  NAT: { skyId:"NAT", entityId:"27539928" },
-  VCP: { skyId:"VCP", entityId:"27539510" },
-  FLN: { skyId:"FLN", entityId:"27539796" },
-  MCZ: { skyId:"MCZ", entityId:"27539867" },
-  SLZ: { skyId:"SLZ", entityId:"27540128" },
-  THE: { skyId:"THE", entityId:"27540179" },
-  // EUA
-  MIA: { skyId:"MIA", entityId:"27537542" },
-  JFK: { skyId:"JFK", entityId:"27537541" },
-  LAX: { skyId:"LAX", entityId:"27537545" },
-  MCO: { skyId:"MCO", entityId:"27537543" },
-  ORD: { skyId:"ORD", entityId:"27537539" },
-  ATL: { skyId:"ATL", entityId:"27537533" },
-  EWR: { skyId:"EWR", entityId:"27537540" },
-  // Europa
-  LIS: { skyId:"LIS", entityId:"27544008" },
-  MAD: { skyId:"MAD", entityId:"27543993" },
-  CDG: { skyId:"CDG", entityId:"27539733" },
-  LHR: { skyId:"LHR", entityId:"27544008" },
-  FRA: { skyId:"FRA", entityId:"27543780" },
-  AMS: { skyId:"AMS", entityId:"27544066" },
-  FCO: { skyId:"FCO", entityId:"27543826" },
-  BCN: { skyId:"BCN", entityId:"27543769" },
-};
-
 // Cache dinâmico para aeroportos não mapeados
 const dynamicCache = {};
 
 async function getAirportId(code) {
-  // Usa mapa pré-carregado (zero requisições de API)
-  if (AIRPORT_MAP[code]) return AIRPORT_MAP[code];
   // Cache dinâmico
   if (dynamicCache[code]) return dynamicCache[code];
-  // Fallback: busca dinâmica (gasta 1 crédito)
-  console.log(`Buscando ID dinâmico para: ${code}`);
-  const url = `https://${HOST}/flights/airports?query=${encodeURIComponent(code)}`;
+  // Usa auto-complete que retorna resultado filtrado corretamente
+  const url = `https://${HOST}/flights/auto-complete?query=${encodeURIComponent(code)}&locale=pt-BR`;
   const res = await fetch(url, { headers: hdr() });
-  if (!res.ok) throw new Error(`Airport lookup ${res.status} — aeroporto ${code} não encontrado no mapa`);
+  if (!res.ok) throw new Error(`Airport lookup ${res.status}`);
   const data = await res.json();
   const list = data.data || [];
-  const match = list.find(a => a.skyId === code || a.iata === code) || list[0];
+  // Busca match exato pelo código IATA
+  const match = list.find(a =>
+    a.skyId === code ||
+    a.iata  === code ||
+    a.presentation?.skyId === code
+  ) || list[0];
   if (!match) throw new Error(`Aeroporto ${code} não encontrado`);
-  const result = { skyId: match.skyId || code, entityId: match.entityId };
+  const result = {
+    skyId:    match.skyId || match.presentation?.skyId || code,
+    entityId: match.entityId || match.id,
+  };
+  console.log(`Airport ${code}:`, result);
   dynamicCache[code] = result;
   return result;
 }
 
 // Health check
 app.get("/", (req, res) => {
-  res.json({ status: "VooScanner API online ✈", api: HOST, airports: Object.keys(AIRPORT_MAP).length });
+  res.json({ status: "VooScanner API online ✈", api: HOST, cached: Object.keys(dynamicCache) });
 });
 
 // Busca voos reais — flights/search-one-way
@@ -154,10 +119,11 @@ app.get("/api/debug-airport", async (req, res) => {
   const { code } = req.query;
   if (!code) return res.status(400).json({ error: "code obrigatório" });
   try {
-    const url = `https://${HOST}/flights/airports?query=${encodeURIComponent(code)}`;
+    const url = `https://${HOST}/flights/auto-complete?query=${encodeURIComponent(code)}&locale=pt-BR`;
     const r = await fetch(url, { headers: hdr() });
-    const txt = await r.text();
-    res.json({ status: r.status, raw: JSON.parse(txt) });
+    const data = await r.json();
+    // Mostra só os primeiros 3 resultados para facilitar leitura
+    res.json({ status: r.status, results: (data.data||[]).slice(0,5).map(a=>({skyId:a.skyId,entityId:a.entityId||a.id,name:a.presentation?.title||a.name})) });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
