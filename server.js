@@ -114,30 +114,39 @@ app.get("/api/flights", async (req, res) => {
   }
 });
 
-// Debug — descobre o entityId correto de um aeroporto
-app.get("/api/debug-airport", async (req, res) => {
-  const { code } = req.query;
-  if (!code) return res.status(400).json({ error: "code obrigatório" });
-  try {
-    const url = `https://${HOST}/flights/auto-complete?query=${encodeURIComponent(code)}&locale=pt-BR`;
-    const r = await fetch(url, { headers: hdr() });
-    const data = await r.json();
-    // Mostra só os primeiros 3 resultados para facilitar leitura
-    res.json({ status: r.status, results: (data.data||[]).slice(0,5).map(a=>({skyId:a.skyId,entityId:a.entityId||a.id,name:a.presentation?.title||a.name})) });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Debug — testa a busca de voos com entityIds específicos
+// Debug — mostra resposta bruta da busca de voos
 app.get("/api/debug-flight", async (req, res) => {
   const { fromId, toId, date } = req.query;
   try {
     const url = `https://${HOST}/flights/search-one-way?fromEntityId=${fromId}&toEntityId=${toId}&departDate=${date||"2026-07-10"}&adults=1&currency=BRL`;
     const r = await fetch(url, { headers: hdr() });
-    const txt = await r.text();
-    const data = JSON.parse(txt);
-    res.json({ status: r.status, itineraries: data?.data?.itineraries?.length||0, raw_sample: data?.data?.itineraries?.[0] || data });
+    const data = await r.json();
+    res.json({ 
+      status: r.status, 
+      itineraries_count: data?.data?.itineraries?.length || 0,
+      context: data?.data?.context,
+      first: data?.data?.itineraries?.[0] || null,
+      raw_keys: Object.keys(data || {})
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Debug — busca aeroporto via auto-complete e mostra IDs
+app.get("/api/debug-ap", async (req, res) => {
+  const { q } = req.query;
+  try {
+    const url = `https://${HOST}/flights/auto-complete?query=${encodeURIComponent(q||"Fortaleza")}&locale=pt-BR`;
+    const r = await fetch(url, { headers: hdr() });
+    const data = await r.json();
+    const items = (data.data||[]).slice(0,5).map(a=>({
+      skyId: a.skyId, 
+      entityId: a.entityId,
+      id: a.id,
+      name: a.presentation?.title || a.name || a.iata
+    }));
+    res.json({ status: r.status, items });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
